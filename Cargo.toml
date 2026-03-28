@@ -1,0 +1,25 @@
+[package]
+name = "chuckles"
+version = "0.1.0"
+edition = "2024"
+description = "A lightweight image viewer for Linux"
+license = "GPL-3.0"
+
+[[bin]]
+name = "chuckles"
+path = "src/main.rs"
+
+[dependencies]
+gtk4 = "0.9"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif", "bmp", "webp", "tiff"] }
+jxl-oxide = "0.12"
+resvg = "0.45"
+kamadak-exif = "0.5"
+alphanumeric-sort = "1.5"
+imagesize = "0.13"
+toml = "0.8"
+serde = { version = "1", features = ["derive"] }
+dirs = "6"
+
+[dev-dependencies]
+tempfile = "3"

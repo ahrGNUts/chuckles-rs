@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Chuckles Image Viewer
+Comment=Lightweight image viewer
+Exec=chuckles %f
+Icon=chuckles
+Terminal=false
+Categories=Graphics;Viewer;
+MimeType=image/jpeg;image/png;image/gif;image/bmp;image/webp;image/tiff;image/jxl;image/svg+xml;
