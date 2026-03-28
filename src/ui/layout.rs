@@ -47,7 +47,7 @@ pub fn build_main_layout(window: &ApplicationWindow, state: &Rc<RefCell<AppState
     right_arrow.set_visible(false);
     overlay.add_overlay(&right_arrow);
 
-    // Show/hide arrows on mouse enter/leave
+    // Show/hide arrows on mouse enter/leave + track cursor position for zoom anchoring
     let hover_ctrl = gtk4::EventControllerMotion::new();
     let left_show = left_arrow.clone();
     let right_show = right_arrow.clone();
@@ -60,6 +60,10 @@ pub fn build_main_layout(window: &ApplicationWindow, state: &Rc<RefCell<AppState
     hover_ctrl.connect_leave(move |_| {
         left_hide.set_visible(false);
         right_hide.set_visible(false);
+    });
+    let state_motion = state.clone();
+    hover_ctrl.connect_motion(move |_, x, y| {
+        state_motion.borrow_mut().last_mouse_pos = Some((x, y));
     });
     overlay.add_controller(hover_ctrl);
 

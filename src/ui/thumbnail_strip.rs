@@ -8,6 +8,8 @@ use gtk4::{Picture, ScrolledWindow};
 use crate::ui::state::{self, AppState};
 
 const THUMB_SIZE: i32 = 64;
+/// Number of thumbnails to eagerly decode on each side of the current image.
+const VISIBLE_WINDOW: usize = 20;
 
 /// Build the thumbnail strip widget.
 pub fn build_thumbnail_strip(state: &Rc<RefCell<AppState>>) -> ScrolledWindow {
@@ -28,6 +30,8 @@ pub fn build_thumbnail_strip(state: &Rc<RefCell<AppState>>) -> ScrolledWindow {
 }
 
 /// Rebuild the thumbnail strip content for the current directory.
+/// Only decodes thumbnails within VISIBLE_WINDOW of the current image;
+/// all others get placeholder frames (lazy loading).
 pub fn update_thumbnails(strip: &ScrolledWindow, state: &Rc<RefCell<AppState>>) {
     let content = gtk4::Box::new(gtk4::Orientation::Horizontal, 4);
     content.set_margin_start(4);
@@ -36,28 +40,41 @@ pub fn update_thumbnails(strip: &ScrolledWindow, state: &Rc<RefCell<AppState>>) 
     content.set_margin_bottom(4);
 
     let s = state.borrow();
-    let current_idx = s.image_list.current_index();
+    let current_idx = s.image_list.current_index().unwrap_or(0);
+    let len = s.image_list.len();
 
-    for i in 0..s.image_list.len() {
+    let visible_start = current_idx.saturating_sub(VISIBLE_WINDOW);
+    let visible_end = (current_idx + VISIBLE_WINDOW + 1).min(len);
+
+    for i in 0..len {
         let Some(path) = s.image_list.path_at(i) else {
             continue;
         };
 
         let frame = gtk4::Frame::new(None);
+        frame.set_size_request(THUMB_SIZE + 4, THUMB_SIZE + 4);
 
-        // Try to load a thumbnail
-        if let Ok(pixbuf) = Pixbuf::from_file_at_scale(path, THUMB_SIZE, THUMB_SIZE, true) {
-            let picture = Picture::for_pixbuf(&pixbuf);
-            picture.set_size_request(THUMB_SIZE, THUMB_SIZE);
-            frame.set_child(Some(&picture));
+        if i >= visible_start && i < visible_end {
+            // Within visible window: decode the thumbnail
+            if let Ok(pixbuf) = Pixbuf::from_file_at_scale(path, THUMB_SIZE, THUMB_SIZE, true) {
+                let picture = Picture::for_pixbuf(&pixbuf);
+                picture.set_size_request(THUMB_SIZE, THUMB_SIZE);
+                frame.set_child(Some(&picture));
+            } else {
+                let label = gtk4::Label::new(Some("?"));
+                label.set_size_request(THUMB_SIZE, THUMB_SIZE);
+                frame.set_child(Some(&label));
+            }
         } else {
-            let label = gtk4::Label::new(Some("?"));
-            label.set_size_request(THUMB_SIZE, THUMB_SIZE);
-            frame.set_child(Some(&label));
+            // Outside visible window: placeholder
+            let placeholder = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+            placeholder.set_size_request(THUMB_SIZE, THUMB_SIZE);
+            placeholder.add_css_class("dim-label");
+            frame.set_child(Some(&placeholder));
         }
 
         // Highlight current image
-        if current_idx == Some(i) {
+        if s.image_list.current_index() == Some(i) {
             frame.add_css_class("thumbnail-current");
         }
 
@@ -74,4 +91,19 @@ pub fn update_thumbnails(strip: &ScrolledWindow, state: &Rc<RefCell<AppState>>) 
 
     drop(s);
     strip.set_child(Some(&content));
+
+    // Scroll to show the current thumbnail
+    scroll_to_current(strip, current_idx, len);
+}
+
+fn scroll_to_current(strip: &ScrolledWindow, current: usize, total: usize) {
+    if total == 0 {
+        return;
+    }
+    let adj = strip.hadjustment();
+    let thumb_width = (THUMB_SIZE + 8) as f64; // frame + gap
+    let target = current as f64 * thumb_width;
+    let page = adj.page_size();
+    // Center the current thumbnail in the strip
+    adj.set_value(target - page / 2.0 + thumb_width / 2.0);
 }

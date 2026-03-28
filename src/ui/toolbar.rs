@@ -100,13 +100,26 @@ pub fn apply_edit_action(state: &Rc<RefCell<AppState>>, action: EditAction) {
         _ => unreachable!(),
     };
 
-    // Convert back to pixbuf
+    // Convert back and store pixels once, then build pixbuf from stored data.
     let rgba = result.to_rgba8();
     let (new_w, new_h) = (rgba.width(), rgba.height());
     let raw = rgba.into_raw();
 
+    let (format, color_depth) = s
+        .current_image
+        .as_ref()
+        .map(|img| (img.format, img.color_depth))
+        .unwrap_or((crate::formats::ImageFormat::Png, 32));
+    s.current_image = Some(crate::formats::DecodedImage {
+        width: new_w,
+        height: new_h,
+        pixels: raw,
+        format,
+        color_depth,
+    });
+    let pixels = &s.current_image.as_ref().unwrap().pixels;
     let new_pixbuf = gtk4::gdk_pixbuf::Pixbuf::from_bytes(
-        &gtk4::glib::Bytes::from(&raw),
+        &gtk4::glib::Bytes::from(pixels.as_slice()),
         gtk4::gdk_pixbuf::Colorspace::Rgb,
         true,
         8,
@@ -114,19 +127,6 @@ pub fn apply_edit_action(state: &Rc<RefCell<AppState>>, action: EditAction) {
         new_h as i32,
         (new_w * 4) as i32,
     );
-
-    // Update both pixbuf and DecodedImage to keep dimensions/pixels in sync.
-    let format = s
-        .current_image
-        .as_ref()
-        .map(|img| img.format)
-        .unwrap_or(crate::formats::ImageFormat::Png);
-    s.current_image = Some(crate::formats::DecodedImage {
-        width: new_w,
-        height: new_h,
-        pixels: raw.clone(),
-        format,
-    });
     s.current_pixbuf = Some(new_pixbuf);
     s.has_unsaved_edits = true;
 

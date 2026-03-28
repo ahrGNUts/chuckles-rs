@@ -10,6 +10,8 @@ pub struct DecodedImage {
     pub height: u32,
     pub pixels: Vec<u8>,
     pub format: ImageFormat,
+    /// Bits per pixel of the original source image (e.g., 24 for RGB, 32 for RGBA, 8 for grayscale).
+    pub color_depth: u32,
 }
 
 /// Errors that can occur during image decoding.
@@ -60,6 +62,19 @@ pub fn decode_file(path: &Path) -> Result<DecodedImage, DecodeError> {
 
 fn decode_with_image_crate(path: &Path, format: ImageFormat) -> Result<DecodedImage, DecodeError> {
     let img = image::open(path)?;
+    let color_depth = match img.color() {
+        image::ColorType::L8 => 8,
+        image::ColorType::La8 => 16,
+        image::ColorType::Rgb8 => 24,
+        image::ColorType::Rgba8 => 32,
+        image::ColorType::L16 => 16,
+        image::ColorType::La16 => 32,
+        image::ColorType::Rgb16 => 48,
+        image::ColorType::Rgba16 => 64,
+        image::ColorType::Rgb32F => 96,
+        image::ColorType::Rgba32F => 128,
+        _ => 24, // conservative default
+    };
     let rgba = img.to_rgba8();
     let (width, height) = rgba.dimensions();
 
@@ -68,6 +83,7 @@ fn decode_with_image_crate(path: &Path, format: ImageFormat) -> Result<DecodedIm
         height,
         pixels: rgba.into_raw(),
         format,
+        color_depth,
     })
 }
 
@@ -86,6 +102,7 @@ fn decode_jxl(path: &Path, format: ImageFormat) -> Result<DecodedImage, DecodeEr
     let height = stream.height() as u32;
 
     let channels = stream.channels();
+    let color_depth = (channels as u32) * 8;
     let num_pixels = (width * height) as usize;
     let mut pixels = Vec::with_capacity(num_pixels * 4);
 
@@ -119,6 +136,7 @@ fn decode_jxl(path: &Path, format: ImageFormat) -> Result<DecodedImage, DecodeEr
         height,
         pixels,
         format,
+        color_depth,
     })
 }
 
@@ -166,6 +184,7 @@ fn decode_svg(path: &Path, format: ImageFormat) -> Result<DecodedImage, DecodeEr
         height,
         pixels,
         format,
+        color_depth: 32, // SVG is always rendered as RGBA
     })
 }
 

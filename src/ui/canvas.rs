@@ -14,7 +14,7 @@ pub fn build_canvas(state: &Rc<RefCell<AppState>>) -> DrawingArea {
 
     let state = state.clone();
     canvas.set_draw_func(move |_area, cr, width, height| {
-        let s = state.borrow();
+        let mut s = state.borrow_mut();
 
         // Background
         if let Ok(color) = parse_hex_color(&s.background_color) {
@@ -24,7 +24,7 @@ pub fn build_canvas(state: &Rc<RefCell<AppState>>) -> DrawingArea {
         }
         let _ = cr.paint();
 
-        let Some(pixbuf) = &s.current_pixbuf else {
+        let Some(pixbuf) = s.current_pixbuf.clone() else {
             return;
         };
 
@@ -37,9 +37,10 @@ pub fn build_canvas(state: &Rc<RefCell<AppState>>) -> DrawingArea {
             ZoomMode::Fit => {
                 let scale_x = canvas_w / img_w;
                 let scale_y = canvas_h / img_h;
-                let fit = scale_x.min(scale_y);
-                // Don't upscale images smaller than canvas
-                fit.min(1.0)
+                let fit = scale_x.min(scale_y).min(1.0);
+                // Store the computed fit scale so zoom_factor() returns the real value
+                s.computed_fit_scale = fit;
+                fit
             }
             ZoomMode::Actual => 1.0,
             ZoomMode::Custom(f) => f,
@@ -56,7 +57,7 @@ pub fn build_canvas(state: &Rc<RefCell<AppState>>) -> DrawingArea {
         cr.translate(x, y);
         cr.scale(scale, scale);
 
-        gtk4::gdk::prelude::GdkCairoContextExt::set_source_pixbuf(cr, pixbuf, 0.0, 0.0);
+        gtk4::gdk::prelude::GdkCairoContextExt::set_source_pixbuf(cr, &pixbuf, 0.0, 0.0);
 
         // Use appropriate interpolation based on zoom level
         if scale < 1.0 {

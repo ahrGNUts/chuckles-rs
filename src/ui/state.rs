@@ -39,6 +39,9 @@ pub struct AppState {
     pub thumbnail_strip_visible: bool,
     pub edit_panel_visible: bool,
     pub pan_offset: (f64, f64),
+    pub last_mouse_pos: Option<(f64, f64)>,
+    /// The computed fit scale from the canvas, updated each draw.
+    pub computed_fit_scale: f64,
     pub window: Option<gtk4::ApplicationWindow>,
     // Callbacks to update UI components
     pub on_image_changed: Option<Rc<dyn Fn()>>,
@@ -74,6 +77,8 @@ impl AppState {
             thumbnail_strip_visible,
             edit_panel_visible: false,
             pan_offset: (0.0, 0.0),
+            last_mouse_pos: None,
+            computed_fit_scale: 1.0,
             window: None,
             on_image_changed: None,
             on_zoom_changed: None,
@@ -123,6 +128,71 @@ impl AppState {
         self.pan_offset.1 *= ratio;
     }
 
+    /// Zoom in/out anchored on a specific point (e.g., mouse cursor position).
+    /// `anchor_x` and `anchor_y` are in canvas-relative coordinates.
+    /// `canvas_w` and `canvas_h` are the canvas dimensions.
+    pub fn zoom_at_point(
+        &mut self,
+        zoom_in: bool,
+        anchor_x: f64,
+        anchor_y: f64,
+        canvas_w: f64,
+        canvas_h: f64,
+    ) {
+        let old_zoom = self.zoom_factor();
+        if zoom_in {
+            let current = old_zoom;
+            for &step in ZOOM_STEPS {
+                if step > current + 0.001 {
+                    self.zoom = ZoomMode::Custom(step);
+                    self.adjust_pan_for_anchor(
+                        old_zoom, step, anchor_x, anchor_y, canvas_w, canvas_h,
+                    );
+                    if let Some(cb) = &self.on_zoom_changed {
+                        cb();
+                    }
+                    return;
+                }
+            }
+        } else {
+            let current = old_zoom;
+            for &step in ZOOM_STEPS.iter().rev() {
+                if step < current - 0.001 {
+                    self.zoom = ZoomMode::Custom(step);
+                    self.adjust_pan_for_anchor(
+                        old_zoom, step, anchor_x, anchor_y, canvas_w, canvas_h,
+                    );
+                    if let Some(cb) = &self.on_zoom_changed {
+                        cb();
+                    }
+                    return;
+                }
+            }
+        }
+    }
+
+    /// Adjust pan offset so the point under the cursor stays in place after zoom.
+    fn adjust_pan_for_anchor(
+        &mut self,
+        old_zoom: f64,
+        new_zoom: f64,
+        anchor_x: f64,
+        anchor_y: f64,
+        canvas_w: f64,
+        canvas_h: f64,
+    ) {
+        // The anchor point in image space:
+        // canvas_center + pan_offset maps to the center of the image
+        // anchor relative to canvas center:
+        let dx = anchor_x - canvas_w / 2.0;
+        let dy = anchor_y - canvas_h / 2.0;
+
+        // Scale the pan offset and adjust for the anchor point shift
+        let ratio = new_zoom / old_zoom;
+        self.pan_offset.0 = self.pan_offset.0 * ratio - dx * (ratio - 1.0);
+        self.pan_offset.1 = self.pan_offset.1 * ratio - dy * (ratio - 1.0);
+    }
+
     pub fn zoom_fit(&mut self) {
         self.zoom = ZoomMode::Fit;
         self.pan_offset = (0.0, 0.0);
@@ -143,7 +213,7 @@ impl AppState {
         match self.zoom {
             ZoomMode::Custom(f) => f,
             ZoomMode::Actual => 1.0,
-            ZoomMode::Fit => 1.0, // Actual fit factor is computed by the canvas
+            ZoomMode::Fit => self.computed_fit_scale,
         }
     }
 
@@ -228,23 +298,55 @@ pub fn open_file(state: &Rc<RefCell<AppState>>, path: &Path) {
     }
 }
 
-/// Check if there are unsaved edits. Returns true if safe to proceed.
-/// In the future, this should show a confirmation dialog.
-pub fn check_unsaved_edits(state: &Rc<RefCell<AppState>>) -> bool {
-    let s = state.borrow();
-    if s.has_unsaved_edits {
-        // TODO: show a GTK dialog asking to save/discard/cancel
-        // For now, discard silently but log a warning
-        eprintln!("Warning: discarding unsaved edits");
+/// Show the unsaved edits confirmation dialog. Calls `on_discard` if the user
+/// chooses to discard, does nothing if they cancel.
+/// Note: GTK4 AlertDialog is async so we cannot block for a return value.
+/// Instead, callers pass a continuation closure.
+pub fn confirm_discard_edits(state: &Rc<RefCell<AppState>>, on_discard: impl Fn() + 'static) {
+    let has_edits = state.borrow().has_unsaved_edits;
+    if !has_edits {
+        on_discard();
+        return;
     }
-    true
+
+    let window = state.borrow().window.clone();
+    let Some(win) = window else {
+        // No window available, just discard
+        on_discard();
+        return;
+    };
+
+    let dialog = gtk4::AlertDialog::builder()
+        .message("Unsaved Changes")
+        .detail("You have unsaved edits. Discard them?")
+        .buttons(["Cancel", "Discard"])
+        .cancel_button(0)
+        .default_button(1)
+        .modal(true)
+        .build();
+
+    let state = state.clone();
+    dialog.choose(Some(&win), None::<&gtk4::gio::Cancellable>, move |result| {
+        if result == Ok(1) {
+            // User chose "Discard"
+            state.borrow_mut().has_unsaved_edits = false;
+            on_discard();
+        }
+        // result == Ok(0) or Err => user cancelled, do nothing
+    });
 }
 
 /// Navigate to the next/prev/first/last image.
+/// If there are unsaved edits, shows a confirmation dialog first.
 pub fn navigate(state: &Rc<RefCell<AppState>>, action: NavigateAction) {
-    if !check_unsaved_edits(state) {
-        return;
-    }
+    let state_for_dialog = state.clone();
+    let state_for_nav = state.clone();
+    confirm_discard_edits(&state_for_dialog, move || {
+        do_navigate(&state_for_nav, action);
+    });
+}
+
+fn do_navigate(state: &Rc<RefCell<AppState>>, action: NavigateAction) {
     let path = {
         let mut s = state.borrow_mut();
         let changed = match action {
@@ -265,17 +367,21 @@ pub fn navigate(state: &Rc<RefCell<AppState>>, action: NavigateAction) {
 }
 
 pub fn navigate_to_index(state: &Rc<RefCell<AppState>>, index: usize) {
-    let path = {
-        let mut s = state.borrow_mut();
-        if !s.image_list.go_to(index) {
-            return;
+    let state_for_dialog = state.clone();
+    let state_for_nav = state.clone();
+    let idx = index;
+    confirm_discard_edits(&state_for_dialog, move || {
+        let path = {
+            let mut s = state_for_nav.borrow_mut();
+            if !s.image_list.go_to(idx) {
+                return;
+            }
+            s.image_list.current_path().map(|p| p.to_path_buf())
+        };
+        if let Some(path) = path {
+            load_image_at_path(&state_for_nav, &path);
         }
-        s.image_list.current_path().map(|p| p.to_path_buf())
-    };
-
-    if let Some(path) = path {
-        load_image_at_path(state, &path);
-    }
+    });
 }
 
 fn load_image_at_path(state: &Rc<RefCell<AppState>>, path: &Path) {

@@ -45,7 +45,7 @@ pub fn update_metadata_content(panel: &ScrolledWindow, state: &AppState) {
             path,
             decoded.width,
             decoded.height,
-            32, // RGBA = 32bpp
+            decoded.color_depth,
             decoded.format,
         );
         if let Some(info) = info {

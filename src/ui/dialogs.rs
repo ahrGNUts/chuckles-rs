@@ -60,24 +60,34 @@ pub fn show_resize_dialog(window: &ApplicationWindow, state: &Rc<RefCell<AppStat
 
     content.append(&grid);
 
-    // Link width/height when aspect locked
+    // Link width/height when aspect locked, with re-entrancy guard
+    let updating = Rc::new(std::cell::Cell::new(false));
+
     let height_ref = height_spin.clone();
     let lock_ref = lock_aspect.clone();
     let aspect = orig_w / orig_h;
+    let guard_w = updating.clone();
     width_spin.connect_value_changed(move |spin| {
-        if lock_ref.is_active() {
-            let new_h = (spin.value() / aspect).round();
-            height_ref.set_value(new_h);
+        if guard_w.get() || !lock_ref.is_active() {
+            return;
         }
+        guard_w.set(true);
+        let new_h = (spin.value() / aspect).round();
+        height_ref.set_value(new_h);
+        guard_w.set(false);
     });
 
     let width_ref = width_spin.clone();
     let lock_ref2 = lock_aspect.clone();
+    let guard_h = updating.clone();
     height_spin.connect_value_changed(move |spin| {
-        if lock_ref2.is_active() {
-            let new_w = (spin.value() * aspect).round();
-            width_ref.set_value(new_w);
+        if guard_h.get() || !lock_ref2.is_active() {
+            return;
         }
+        guard_h.set(true);
+        let new_w = (spin.value() * aspect).round();
+        width_ref.set_value(new_w);
+        guard_h.set(false);
     });
 
     // Link percentage to dimensions
@@ -150,28 +160,7 @@ fn apply_resize(state: &Rc<RefCell<AppState>>, new_w: u32, new_h: u32) {
     let (rw, rh) = (rgba.width(), rgba.height());
     let raw = rgba.into_raw();
 
-    let format = s
-        .current_image
-        .as_ref()
-        .map(|img| img.format)
-        .unwrap_or(crate::formats::ImageFormat::Png);
-    s.current_image = Some(crate::formats::DecodedImage {
-        width: rw,
-        height: rh,
-        pixels: raw.clone(),
-        format,
-    });
-
-    let new_pixbuf = gtk4::gdk_pixbuf::Pixbuf::from_bytes(
-        &glib::Bytes::from(&raw),
-        gtk4::gdk_pixbuf::Colorspace::Rgb,
-        true,
-        8,
-        rw as i32,
-        rh as i32,
-        (rw * 4) as i32,
-    );
-    s.current_pixbuf = Some(new_pixbuf);
+    store_edited_pixels(&mut s, raw, rw, rh);
     s.has_unsaved_edits = true;
 
     let cb = s.on_image_changed.clone();
@@ -261,6 +250,37 @@ pub fn show_crop_dialog(window: &ApplicationWindow, state: &Rc<RefCell<AppState>
         }
     });
 
+    // Enforce aspect ratio when crop width/height are changed manually
+    let crop_updating = Rc::new(std::cell::Cell::new(false));
+    let h_crop = h_spin.clone();
+    let preset_w = preset.clone();
+    let guard_cw = crop_updating.clone();
+    w_spin.connect_value_changed(move |spin| {
+        if guard_cw.get() {
+            return;
+        }
+        let ratio = selected_ratio(preset_w.selected(), orig_w, orig_h);
+        if let Some(r) = ratio {
+            guard_cw.set(true);
+            h_crop.set_value((spin.value() / r).round().min(orig_h));
+            guard_cw.set(false);
+        }
+    });
+    let w_crop = w_spin.clone();
+    let preset_h = preset.clone();
+    let guard_ch = crop_updating.clone();
+    h_spin.connect_value_changed(move |spin| {
+        if guard_ch.get() {
+            return;
+        }
+        let ratio = selected_ratio(preset_h.selected(), orig_w, orig_h);
+        if let Some(r) = ratio {
+            guard_ch.set(true);
+            w_crop.set_value((spin.value() * r).round().min(orig_w));
+            guard_ch.set(false);
+        }
+    });
+
     // Buttons
     let btn_box = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
     btn_box.set_halign(gtk4::Align::End);
@@ -318,33 +338,50 @@ fn apply_crop(state: &Rc<RefCell<AppState>>, x: u32, y: u32, w: u32, h: u32) {
     let (cw, ch) = (cropped_rgba.width(), cropped_rgba.height());
     let raw = cropped_rgba.into_raw();
 
-    let format = s
-        .current_image
-        .as_ref()
-        .map(|img| img.format)
-        .unwrap_or(crate::formats::ImageFormat::Png);
-    s.current_image = Some(crate::formats::DecodedImage {
-        width: cw,
-        height: ch,
-        pixels: raw.clone(),
-        format,
-    });
-
-    let new_pixbuf = gtk4::gdk_pixbuf::Pixbuf::from_bytes(
-        &glib::Bytes::from(&raw),
-        gtk4::gdk_pixbuf::Colorspace::Rgb,
-        true,
-        8,
-        cw as i32,
-        ch as i32,
-        (cw * 4) as i32,
-    );
-    s.current_pixbuf = Some(new_pixbuf);
+    store_edited_pixels(&mut s, raw, cw, ch);
     s.has_unsaved_edits = true;
 
     let cb = s.on_image_changed.clone();
     drop(s);
     if let Some(cb) = cb {
         cb();
+    }
+}
+
+/// Store edited pixel data into AppState, avoiding unnecessary clones.
+fn store_edited_pixels(s: &mut AppState, raw: Vec<u8>, width: u32, height: u32) {
+    let (format, color_depth) = s
+        .current_image
+        .as_ref()
+        .map(|img| (img.format, img.color_depth))
+        .unwrap_or((crate::formats::ImageFormat::Png, 32));
+    s.current_image = Some(crate::formats::DecodedImage {
+        width,
+        height,
+        pixels: raw,
+        format,
+        color_depth,
+    });
+    let pixels = &s.current_image.as_ref().unwrap().pixels;
+    let new_pixbuf = gtk4::gdk_pixbuf::Pixbuf::from_bytes(
+        &glib::Bytes::from(pixels.as_slice()),
+        gtk4::gdk_pixbuf::Colorspace::Rgb,
+        true,
+        8,
+        width as i32,
+        height as i32,
+        (width * 4) as i32,
+    );
+    s.current_pixbuf = Some(new_pixbuf);
+}
+
+fn selected_ratio(preset_index: u32, orig_w: f64, orig_h: f64) -> Option<f64> {
+    match preset_index {
+        1 => Some(orig_w / orig_h), // Original
+        2 => Some(1.0),             // 1:1
+        3 => Some(4.0 / 3.0),       // 4:3
+        4 => Some(16.0 / 9.0),      // 16:9
+        5 => Some(3.0 / 2.0),       // 3:2
+        _ => None,                  // Free
     }
 }

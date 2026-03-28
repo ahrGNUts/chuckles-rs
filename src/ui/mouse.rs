@@ -26,13 +26,18 @@ fn setup_scroll_handler(window: &ApplicationWindow, state: &Rc<RefCell<AppState>
             .unwrap_or(false);
 
         if ctrl_held {
-            // Ctrl+scroll always zooms, regardless of scroll wheel mode
+            // Ctrl+scroll zooms centered on the mouse cursor position.
+            // EventControllerScroll doesn't expose cursor coords directly,
+            // so we use the last known motion position stored in state,
+            // falling back to canvas center.
+            let (canvas_w, canvas_h) = get_widget_size(ctrl);
+            let (cx, cy) = {
+                let s = state.borrow();
+                s.last_mouse_pos.unwrap_or((canvas_w / 2.0, canvas_h / 2.0))
+            };
+
             let mut s = state.borrow_mut();
-            if dy < 0.0 {
-                s.zoom_in();
-            } else {
-                s.zoom_out();
-            }
+            s.zoom_at_point(dy < 0.0, cx, cy, canvas_w, canvas_h);
         } else {
             let scroll_mode = state.borrow().scroll_wheel;
             match scroll_mode {
@@ -58,6 +63,12 @@ fn setup_scroll_handler(window: &ApplicationWindow, state: &Rc<RefCell<AppState>
     });
 
     window.add_controller(controller);
+}
+
+fn get_widget_size(ctrl: &gtk4::EventControllerScroll) -> (f64, f64) {
+    ctrl.widget()
+        .map(|w| (w.width() as f64, w.height() as f64))
+        .unwrap_or((1.0, 1.0))
 }
 
 fn setup_drag_handler(window: &ApplicationWindow, state: &Rc<RefCell<AppState>>) {
@@ -95,11 +106,10 @@ fn setup_double_click_handler(window: &ApplicationWindow, state: &Rc<RefCell<App
     gesture.set_button(1); // Left click
 
     let state = state.clone();
-    gesture.connect_released(move |gesture, n_press, _, _| {
+    gesture.connect_released(move |_gesture, n_press, _, _| {
         if n_press == 2 {
             let mut s = state.borrow_mut();
             if !s.is_fullscreen {
-                // Double-click enters fullscreen (spec: does nothing in fullscreen)
                 s.is_fullscreen = true;
                 if let Some(cb) = &s.on_panels_changed {
                     cb();
