@@ -1,4 +1,4 @@
-mod exif_reader;
+pub mod exif_reader;
 mod file_info;
 
 pub use exif_reader::ExifData;

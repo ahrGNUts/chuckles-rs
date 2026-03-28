@@ -1,0 +1,10 @@
+pub mod canvas;
+pub mod fullscreen;
+pub mod header;
+pub mod keyboard;
+pub mod layout;
+pub mod metadata_panel;
+pub mod mouse;
+pub mod state;
+pub mod thumbnail_strip;
+pub mod toolbar;

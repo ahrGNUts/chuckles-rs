@@ -10,7 +10,7 @@ name = "chuckles"
 path = "src/main.rs"
 
 [dependencies]
-gtk4 = "0.9"
+gtk4 = { version = "0.9", features = ["v4_10"] }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif", "bmp", "webp", "tiff"] }
 jxl-oxide = "0.12"
 resvg = "0.45"

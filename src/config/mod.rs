@@ -1,3 +1,3 @@
 mod settings;
 
-pub use settings::{AppConfig, ScrollWheelMode, SortDirection, SortMode, ZoomDefault};
+pub use settings::{AppConfig, ScrollWheelMode, SortDirection, SortMode, ZoomDefault, load, save};
