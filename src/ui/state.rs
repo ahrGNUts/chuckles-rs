@@ -263,7 +263,7 @@ pub fn open_file(state: &Rc<RefCell<AppState>>, path: &Path) {
             notify_image_changed(state);
         }
         Err(e) => {
-            eprintln!("Error opening {}: {e}", path.display());
+            show_decode_error(state, path, &e);
         }
     }
 
@@ -402,8 +402,26 @@ fn load_image_at_path(state: &Rc<RefCell<AppState>>, path: &Path) {
             notify_image_changed(state);
         }
         Err(e) => {
-            eprintln!("Error loading {}: {e}", path.display());
+            show_decode_error(state, path, &e);
         }
+    }
+}
+
+fn show_decode_error(state: &Rc<RefCell<AppState>>, path: &Path, error: &formats::DecodeError) {
+    let msg = format!("Could not open {}", path.display());
+    let detail = error.to_string();
+    eprintln!("{msg}: {detail}");
+
+    let window = state.borrow().window.clone();
+    if let Some(win) = window {
+        let dialog = gtk4::AlertDialog::builder()
+            .message(&msg)
+            .detail(&detail)
+            .buttons(["OK"])
+            .default_button(0)
+            .modal(true)
+            .build();
+        dialog.choose(Some(&win), None::<&gtk4::gio::Cancellable>, |_| {});
     }
 }
 

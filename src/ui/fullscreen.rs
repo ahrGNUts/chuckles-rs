@@ -143,6 +143,32 @@ fn build_fullscreen_nav_bar(state: &Rc<RefCell<AppState>>) -> gtk4::Box {
     });
     bar.append(&actual_btn);
 
+    // Sort mode selector
+    let sort_options = ["Name", "Date", "Size", "Type", "Dims"];
+    let sort_modes = [
+        crate::config::SortMode::Name,
+        crate::config::SortMode::DateModified,
+        crate::config::SortMode::FileSize,
+        crate::config::SortMode::FileType,
+        crate::config::SortMode::Dimensions,
+    ];
+    let sort_list = gtk4::StringList::new(&sort_options);
+    let sort_dd = gtk4::DropDown::new(Some(sort_list), None::<gtk4::Expression>);
+    sort_dd.set_selected(0);
+    let state_sort = state.clone();
+    sort_dd.connect_selected_notify(move |dd| {
+        let idx = dd.selected() as usize;
+        if idx < sort_modes.len() {
+            let mut s = state_sort.borrow_mut();
+            let dir = s.image_list.sort_direction();
+            s.image_list.set_sort(sort_modes[idx], dir);
+            if let Some(cb) = &s.on_list_changed {
+                cb();
+            }
+        }
+    });
+    bar.append(&sort_dd);
+
     bar
 }
 
