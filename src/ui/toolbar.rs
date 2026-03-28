@@ -51,10 +51,7 @@ pub fn apply_edit_action(state: &Rc<RefCell<AppState>>, action: EditAction) {
     // Crop and Resize need dialog-based interaction.
     match action {
         EditAction::Crop => {
-            let window = state.borrow().window.clone();
-            if let Some(win) = window {
-                super::dialogs::show_crop_dialog(&win, state);
-            }
+            enter_crop_mode(state);
             return;
         }
         EditAction::Resize => {
@@ -134,5 +131,17 @@ pub fn apply_edit_action(state: &Rc<RefCell<AppState>>, action: EditAction) {
     drop(s);
     if let Some(cb) = cb {
         cb();
+    }
+}
+
+fn enter_crop_mode(state: &Rc<RefCell<AppState>>) {
+    let mut s = state.borrow_mut();
+    let Some(decoded) = &s.current_image else {
+        return;
+    };
+    let crop = super::crop_overlay::CropState::new(decoded.width as f64, decoded.height as f64);
+    s.crop_state = Some(crop);
+    if let Some(cb) = &s.on_zoom_changed {
+        cb(); // Triggers canvas redraw
     }
 }

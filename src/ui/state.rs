@@ -38,6 +38,7 @@ pub struct AppState {
     pub sidebar_visible: bool,
     pub thumbnail_strip_visible: bool,
     pub edit_panel_visible: bool,
+    pub crop_state: Option<super::crop_overlay::CropState>,
     pub pan_offset: (f64, f64),
     pub last_mouse_pos: Option<(f64, f64)>,
     /// The computed fit scale from the canvas, updated each draw.
@@ -76,6 +77,7 @@ impl AppState {
             sidebar_visible,
             thumbnail_strip_visible,
             edit_panel_visible: false,
+            crop_state: None,
             pan_offset: (0.0, 0.0),
             last_mouse_pos: None,
             computed_fit_scale: 1.0,

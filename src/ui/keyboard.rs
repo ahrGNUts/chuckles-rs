@@ -55,8 +55,21 @@ pub fn setup_key_handler(window: &ApplicationWindow, state: &Rc<RefCell<AppState
                 glib::Propagation::Stop
             }
 
-            // Full-screen toggle
-            gdk::Key::Return | gdk::Key::F11 => {
+            // Enter: confirm crop (if in crop mode) or toggle full-screen
+            gdk::Key::Return => {
+                let in_crop = state.borrow().crop_state.is_some();
+                if in_crop {
+                    crate::ui::crop_overlay::apply_crop(&state);
+                } else {
+                    let mut s = state.borrow_mut();
+                    s.is_fullscreen = !s.is_fullscreen;
+                    if let Some(cb) = &s.on_panels_changed {
+                        cb();
+                    }
+                }
+                glib::Propagation::Stop
+            }
+            gdk::Key::F11 => {
                 let mut s = state.borrow_mut();
                 s.is_fullscreen = !s.is_fullscreen;
                 if let Some(cb) = &s.on_panels_changed {
@@ -64,15 +77,24 @@ pub fn setup_key_handler(window: &ApplicationWindow, state: &Rc<RefCell<AppState
                 }
                 glib::Propagation::Stop
             }
+            // Escape: cancel crop (if in crop mode) or exit full-screen
             gdk::Key::Escape => {
-                let mut s = state.borrow_mut();
-                if s.is_fullscreen {
-                    s.is_fullscreen = false;
-                    if let Some(cb) = &s.on_panels_changed {
+                let in_crop = state.borrow().crop_state.is_some();
+                if in_crop {
+                    let mut s = state.borrow_mut();
+                    s.crop_state = None;
+                    if let Some(cb) = &s.on_zoom_changed {
                         cb();
                     }
+                } else {
+                    let mut s = state.borrow_mut();
+                    if s.is_fullscreen {
+                        s.is_fullscreen = false;
+                        if let Some(cb) = &s.on_panels_changed {
+                            cb();
+                        }
+                    }
                 }
-                // Do nothing in windowed mode (spec: never close the app)
                 glib::Propagation::Stop
             }
 

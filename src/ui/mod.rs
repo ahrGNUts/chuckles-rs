@@ -1,4 +1,5 @@
 pub mod canvas;
+pub mod crop_overlay;
 pub mod dialogs;
 pub mod fullscreen;
 pub mod header;

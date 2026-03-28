@@ -68,6 +68,11 @@ pub fn build_canvas(state: &Rc<RefCell<AppState>>) -> DrawingArea {
 
         let _ = cr.paint();
         cr.restore().unwrap();
+
+        // Draw crop overlay if in crop mode
+        if let Some(crop) = &s.crop_state {
+            super::crop_overlay::draw_crop_overlay(cr, crop, scale, x, y);
+        }
     });
 
     canvas
