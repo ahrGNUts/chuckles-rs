@@ -159,36 +159,34 @@ fn show_save_as_dialog(window: &ApplicationWindow, state: &Rc<RefCell<AppState>>
         Some(window),
         None::<&gtk4::gio::Cancellable>,
         move |result| {
-            if let Ok(file) = result {
-                if let Some(path) = file.path() {
-                    let s = state.borrow();
-                    if let Some(pixbuf) = &s.current_pixbuf {
-                        let ext = path
-                            .extension()
-                            .and_then(|e| e.to_str())
-                            .unwrap_or("png")
-                            .to_lowercase();
-                        let format = match ext.as_str() {
-                            "jpg" | "jpeg" => "jpeg",
-                            "png" => "png",
-                            "bmp" => "bmp",
-                            "tiff" | "tif" => "tiff",
-                            _ => "png",
-                        };
-                        // Use maximum quality for JPEG saves per spec
-                        let options: &[(&str, &str)] = if format == "jpeg" {
-                            &[("quality", "100")]
-                        } else {
-                            &[]
-                        };
-                        if let Err(e) = pixbuf.savev(&path, format, options) {
-                            eprintln!("Error saving: {e}");
-                        } else {
-                            drop(s);
-                            state.borrow_mut().has_unsaved_edits = false;
-                        }
-                    }
-                }
+            let Ok(file) = result else { return };
+            let Some(path) = file.path() else { return };
+            let s = state.borrow();
+            let Some(pixbuf) = &s.current_pixbuf else {
+                return;
+            };
+            let ext = path
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("png")
+                .to_lowercase();
+            let format = match ext.as_str() {
+                "jpg" | "jpeg" => "jpeg",
+                "png" => "png",
+                "bmp" => "bmp",
+                "tiff" | "tif" => "tiff",
+                _ => "png",
+            };
+            let options: &[(&str, &str)] = if format == "jpeg" {
+                &[("quality", "100")]
+            } else {
+                &[]
+            };
+            if let Err(e) = pixbuf.savev(&path, format, options) {
+                eprintln!("Error saving: {e}");
+            } else {
+                drop(s);
+                state.borrow_mut().has_unsaved_edits = false;
             }
         },
     );

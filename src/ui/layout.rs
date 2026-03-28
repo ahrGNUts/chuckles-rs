@@ -2,7 +2,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use gtk4::prelude::*;
-use gtk4::{ApplicationWindow, Overlay, Revealer, RevealerTransitionType, ScrolledWindow};
+use gtk4::{ApplicationWindow, Overlay, Revealer, RevealerTransitionType};
 
 use crate::ui::{
     canvas, fullscreen, header, metadata_panel, state::AppState, thumbnail_strip, toolbar,
@@ -34,16 +34,34 @@ pub fn build_main_layout(window: &ApplicationWindow, state: &Rc<RefCell<AppState
     overlay.set_hexpand(true);
     overlay.set_vexpand(true);
 
-    // Navigation arrow overlays
+    // Navigation arrow overlays (hidden by default, shown on hover)
     let left_arrow = build_nav_arrow("go-previous-symbolic", state, true);
     left_arrow.set_halign(gtk4::Align::Start);
     left_arrow.set_valign(gtk4::Align::Center);
+    left_arrow.set_visible(false);
     overlay.add_overlay(&left_arrow);
 
     let right_arrow = build_nav_arrow("go-next-symbolic", state, false);
     right_arrow.set_halign(gtk4::Align::End);
     right_arrow.set_valign(gtk4::Align::Center);
+    right_arrow.set_visible(false);
     overlay.add_overlay(&right_arrow);
+
+    // Show/hide arrows on mouse enter/leave
+    let hover_ctrl = gtk4::EventControllerMotion::new();
+    let left_show = left_arrow.clone();
+    let right_show = right_arrow.clone();
+    hover_ctrl.connect_enter(move |_, _, _| {
+        left_show.set_visible(true);
+        right_show.set_visible(true);
+    });
+    let left_hide = left_arrow.clone();
+    let right_hide = right_arrow.clone();
+    hover_ctrl.connect_leave(move |_| {
+        left_hide.set_visible(false);
+        right_hide.set_visible(false);
+    });
+    overlay.add_controller(hover_ctrl);
 
     middle.append(&overlay);
 
@@ -52,7 +70,7 @@ pub fn build_main_layout(window: &ApplicationWindow, state: &Rc<RefCell<AppState
     let sidebar_revealer = Revealer::new();
     sidebar_revealer.set_child(Some(&sidebar));
     sidebar_revealer.set_transition_type(RevealerTransitionType::SlideLeft);
-    sidebar_revealer.set_reveal_child(false);
+    sidebar_revealer.set_reveal_child(state.borrow().sidebar_visible);
     middle.append(&sidebar_revealer);
 
     root.append(&middle);
@@ -62,66 +80,86 @@ pub fn build_main_layout(window: &ApplicationWindow, state: &Rc<RefCell<AppState
     let thumb_revealer = Revealer::new();
     thumb_revealer.set_child(Some(&thumb_strip));
     thumb_revealer.set_transition_type(RevealerTransitionType::SlideUp);
-    thumb_revealer.set_reveal_child(false);
+    thumb_revealer.set_reveal_child(state.borrow().thumbnail_strip_visible);
     root.append(&thumb_revealer);
 
+    // Set up fullscreen edge detection with real panels
+    let fs_panels = fullscreen::setup_fullscreen_panels(&overlay, state);
+
     // Wire up state callbacks to update UI
-    let title_label = header_widgets.title_label.clone();
-    let index_label = header_widgets.index_label.clone();
-    let canvas_ref = image_canvas.clone();
-    let sidebar_ref = sidebar.clone();
+    let widgets = LayoutWidgets {
+        header: header_widgets,
+        canvas: image_canvas,
+        sidebar,
+        sidebar_revealer: &sidebar_revealer,
+        thumb_strip,
+        thumb_revealer: &thumb_revealer,
+        edit_revealer: &edit_revealer,
+        window: window.clone(),
+        fs_panels,
+    };
+    wire_callbacks(state, &widgets);
+
+    root
+}
+
+struct LayoutWidgets<'a> {
+    header: header::HeaderWidgets,
+    canvas: gtk4::DrawingArea,
+    sidebar: gtk4::ScrolledWindow,
+    sidebar_revealer: &'a Revealer,
+    thumb_strip: gtk4::ScrolledWindow,
+    thumb_revealer: &'a Revealer,
+    edit_revealer: &'a Revealer,
+    window: ApplicationWindow,
+    fs_panels: fullscreen::FullscreenPanels,
+}
+
+fn wire_callbacks(state: &Rc<RefCell<AppState>>, w: &LayoutWidgets) {
+    // on_image_changed: update title, metadata, canvas, fullscreen metadata
+    let title_label = w.header.title_label.clone();
+    let index_label = w.header.index_label.clone();
+    let canvas_ref = w.canvas.clone();
+    let sidebar_ref = w.sidebar.clone();
+    let fs_metadata_ref = w.fs_panels.fs_metadata.clone();
     let state_img = state.clone();
     state.borrow_mut().on_image_changed = Some(Rc::new(move || {
         let s = state_img.borrow();
         title_label.set_label(&s.header_title());
-        let idx_text = if let (Some(idx), len) = (s.image_list.current_index(), s.image_list.len())
-        {
-            if len > 0 {
-                format!("{} of {len}", idx + 1)
-            } else {
-                String::new()
-            }
-        } else {
-            String::new()
-        };
-        index_label.set_label(&idx_text);
+        index_label.set_label(&s.header_subtitle());
         drop(s);
         metadata_panel::update_metadata_content(&sidebar_ref, &state_img.borrow());
+        metadata_panel::update_metadata_content(&fs_metadata_ref, &state_img.borrow());
         canvas_ref.queue_draw();
     }));
 
-    let canvas_zoom = image_canvas.clone();
+    // on_zoom_changed: redraw canvas
+    let canvas_zoom = w.canvas.clone();
     state.borrow_mut().on_zoom_changed = Some(Rc::new(move || {
         canvas_zoom.queue_draw();
     }));
 
-    let title_list = header_widgets.title_label.clone();
-    let index_list = header_widgets.index_label.clone();
-    let thumb_strip_ref = thumb_strip.clone();
+    // on_list_changed: update title, thumbnails (both windowed and fullscreen)
+    let title_list = w.header.title_label.clone();
+    let index_list = w.header.index_label.clone();
+    let thumb_strip_ref = w.thumb_strip.clone();
+    let fs_thumb_ref = w.fs_panels.fs_thumb_strip.clone();
     let state_list = state.clone();
     state.borrow_mut().on_list_changed = Some(Rc::new(move || {
         let s = state_list.borrow();
         title_list.set_label(&s.header_title());
-        let idx_text = if let (Some(idx), len) = (s.image_list.current_index(), s.image_list.len())
-        {
-            if len > 0 {
-                format!("{} of {len}", idx + 1)
-            } else {
-                String::new()
-            }
-        } else {
-            String::new()
-        };
-        index_list.set_label(&idx_text);
+        index_list.set_label(&s.header_subtitle());
         drop(s);
         thumbnail_strip::update_thumbnails(&thumb_strip_ref, &state_list);
+        thumbnail_strip::update_thumbnails(&fs_thumb_ref, &state_list);
     }));
 
-    let sidebar_rev = sidebar_revealer.clone();
-    let thumb_rev = thumb_revealer.clone();
-    let edit_rev = edit_revealer.clone();
-    let header_bar = header_widgets.header_bar.clone();
-    let window_ref = window.clone();
+    // on_panels_changed: toggle revealers, fullscreen
+    let sidebar_rev = w.sidebar_revealer.clone();
+    let thumb_rev = w.thumb_revealer.clone();
+    let edit_rev = w.edit_revealer.clone();
+    let header_bar = w.header.header_bar.clone();
+    let window_ref = w.window.clone();
     let state_panels = state.clone();
     state.borrow_mut().on_panels_changed = Some(Rc::new(move || {
         let s = state_panels.borrow();
@@ -132,16 +170,18 @@ pub fn build_main_layout(window: &ApplicationWindow, state: &Rc<RefCell<AppState
         if s.is_fullscreen {
             window_ref.fullscreen();
             header_bar.set_visible(false);
+            // Hide windowed panels in fullscreen
+            sidebar_rev.set_visible(false);
+            thumb_rev.set_visible(false);
+            edit_rev.set_visible(false);
         } else {
             window_ref.unfullscreen();
             header_bar.set_visible(true);
+            sidebar_rev.set_visible(true);
+            thumb_rev.set_visible(true);
+            edit_rev.set_visible(true);
         }
     }));
-
-    // Set up fullscreen edge detection
-    fullscreen::setup_fullscreen_panels(&overlay, state);
-
-    root
 }
 
 fn build_nav_arrow(icon_name: &str, state: &Rc<RefCell<AppState>>, is_prev: bool) -> gtk4::Button {

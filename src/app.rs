@@ -2,7 +2,6 @@ use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
 
-use gtk4::gdk;
 use gtk4::gio;
 use gtk4::glib;
 use gtk4::prelude::*;
@@ -62,6 +61,8 @@ fn build_ui(
     )));
     drop(conf);
 
+    state.borrow_mut().window = Some(window.clone());
+
     let main_layout = ui::layout::build_main_layout(&window, &state);
     window.set_child(Some(&main_layout));
 
@@ -115,9 +116,8 @@ fn open_file_chooser(window: &ApplicationWindow, state: &Rc<RefCell<ui::state::A
     let state = state.clone();
     dialog.open(Some(window), None::<&gio::Cancellable>, move |result| {
         if let Ok(file) = result {
-            if let Some(path) = file.path() {
-                ui::state::open_file(&state, &path);
-            }
+            let Some(path) = file.path() else { return };
+            ui::state::open_file(&state, &path);
         }
     });
 }

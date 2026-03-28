@@ -48,10 +48,20 @@ pub enum EditAction {
 }
 
 pub fn apply_edit_action(state: &Rc<RefCell<AppState>>, action: EditAction) {
-    // Crop and Resize need dialog-based interaction, handled separately.
+    // Crop and Resize need dialog-based interaction.
     match action {
-        EditAction::Crop | EditAction::Resize => {
-            // TODO: implement crop/resize dialogs
+        EditAction::Crop => {
+            let window = state.borrow().window.clone();
+            if let Some(win) = window {
+                super::dialogs::show_crop_dialog(&win, state);
+            }
+            return;
+        }
+        EditAction::Resize => {
+            let window = state.borrow().window.clone();
+            if let Some(win) = window {
+                super::dialogs::show_resize_dialog(&win, state);
+            }
             return;
         }
         _ => {}

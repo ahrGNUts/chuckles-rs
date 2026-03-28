@@ -39,6 +39,7 @@ pub struct AppState {
     pub thumbnail_strip_visible: bool,
     pub edit_panel_visible: bool,
     pub pan_offset: (f64, f64),
+    pub window: Option<gtk4::ApplicationWindow>,
     // Callbacks to update UI components
     pub on_image_changed: Option<Rc<dyn Fn()>>,
     pub on_zoom_changed: Option<Rc<dyn Fn()>>,
@@ -73,6 +74,7 @@ impl AppState {
             thumbnail_strip_visible,
             edit_panel_visible: false,
             pan_offset: (0.0, 0.0),
+            window: None,
             on_image_changed: None,
             on_zoom_changed: None,
             on_list_changed: None,
@@ -81,11 +83,13 @@ impl AppState {
     }
 
     pub fn zoom_in(&mut self) {
-        let current = self.zoom_factor();
+        let old = self.zoom_factor();
+        let current = old;
         for &step in ZOOM_STEPS {
             if step > current + 0.001 {
                 self.zoom = ZoomMode::Custom(step);
-                self.pan_offset = (0.0, 0.0);
+                // Scale pan offset to preserve viewport center
+                self.scale_pan_offset(old, step);
                 if let Some(cb) = &self.on_zoom_changed {
                     cb();
                 }
@@ -95,17 +99,28 @@ impl AppState {
     }
 
     pub fn zoom_out(&mut self) {
-        let current = self.zoom_factor();
+        let old = self.zoom_factor();
+        let current = old;
         for &step in ZOOM_STEPS.iter().rev() {
             if step < current - 0.001 {
                 self.zoom = ZoomMode::Custom(step);
-                self.pan_offset = (0.0, 0.0);
+                self.scale_pan_offset(old, step);
                 if let Some(cb) = &self.on_zoom_changed {
                     cb();
                 }
                 return;
             }
         }
+    }
+
+    /// Scale the pan offset when zoom level changes to keep the viewport centered.
+    fn scale_pan_offset(&mut self, old_zoom: f64, new_zoom: f64) {
+        if old_zoom.abs() < 0.001 {
+            return;
+        }
+        let ratio = new_zoom / old_zoom;
+        self.pan_offset.0 *= ratio;
+        self.pan_offset.1 *= ratio;
     }
 
     pub fn zoom_fit(&mut self) {
@@ -140,12 +155,21 @@ impl AppState {
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_else(|| "chuckles".to_string());
 
-        if let (Some(idx), len) = (self.image_list.current_index(), self.image_list.len()) {
-            if len > 0 {
-                return format!("{filename} ({} of {len})", idx + 1);
-            }
+        if let (Some(idx), len) = (self.image_list.current_index(), self.image_list.len())
+            && len > 0
+        {
+            return format!("{filename} ({} of {len})", idx + 1);
         }
         filename
+    }
+
+    pub fn header_subtitle(&self) -> String {
+        if let (Some(idx), len) = (self.image_list.current_index(), self.image_list.len())
+            && len > 0
+        {
+            return format!("{} of {len}", idx + 1);
+        }
+        String::new()
     }
 }
 

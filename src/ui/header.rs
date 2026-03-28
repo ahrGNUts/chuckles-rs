@@ -4,7 +4,7 @@ use std::rc::Rc;
 use gtk4::prelude::*;
 use gtk4::{Button, HeaderBar, Label, MenuButton, Popover};
 
-use crate::config::{SortDirection, SortMode};
+use crate::config::SortMode;
 use crate::ui::state::AppState;
 
 pub struct HeaderWidgets {
